@@ -115,6 +115,8 @@ class MultiAgentGridEvacuationEnv(gym.Env):
             raise ValueError("exits must be a sequence of (row, col) points.")
         if len(self.exits) == 0:
             raise ValueError("At least one exit is required.")
+        if len({tuple(point) for point in self.starts}) != self.n_agents:
+            raise ValueError("Agent starts must be unique.")
 
         self.n_agents = int(len(self.starts))
         self.moves = (
@@ -193,13 +195,10 @@ class MultiAgentGridEvacuationEnv(gym.Env):
             else:
                 proposals[i] = target
 
-        conflict_agents = self._resolve_vertex_conflicts(proposals)
-        swap_agents = self._resolve_swap_conflicts(prev_pos, proposals)
-        all_conflicts = conflict_agents | swap_agents
-        for i in all_conflicts:
+        proposals, failed_agents, swap_agents = self._resolve_motion_conflicts(prev_pos, proposals)
+        for i in failed_agents:
             if not self.active[i]:
                 continue
-            proposals[i] = prev_pos[i]
             penalty = self.cfg.collision_penalty
             if i in swap_agents:
                 penalty += self.cfg.swap_penalty
@@ -286,6 +285,34 @@ class MultiAgentGridEvacuationEnv(gym.Env):
         idx = int(np.argmin(np.linalg.norm(deltas, axis=1)))
         return deltas[idx].astype(np.float32)
 
+    def _resolve_motion_conflicts(
+        self, prev_pos: np.ndarray, proposals: np.ndarray
+    ) -> tuple[np.ndarray, set[int], set[int]]:
+        final = proposals.copy()
+        failed: set[int] = set()
+        swap_failed: set[int] = set()
+
+        for _ in range(self.n_agents + 1):
+            new_failed: set[int] = set()
+            vertex_failed = self._resolve_vertex_conflicts(final)
+            swap_failed_now = self._resolve_swap_conflicts(prev_pos, final)
+            occupied_failed = self._resolve_occupied_target_conflicts(prev_pos, final)
+
+            new_failed.update(vertex_failed)
+            new_failed.update(swap_failed_now)
+            new_failed.update(occupied_failed)
+            swap_failed.update(swap_failed_now)
+            new_failed.difference_update(failed)
+
+            if not new_failed:
+                break
+
+            for i in new_failed:
+                final[i] = prev_pos[i]
+            failed.update(new_failed)
+
+        return final, failed, swap_failed
+
     def _resolve_vertex_conflicts(self, proposals: np.ndarray) -> set[int]:
         conflicts: set[int] = set()
         buckets: Dict[GridPoint, List[int]] = {}
@@ -305,7 +332,11 @@ class MultiAgentGridEvacuationEnv(gym.Env):
                 if len(allowed) == 0:
                     conflicts.update(ids)
             else:
-                conflicts.update(ids)
+                stayers = [i for i in ids if np.array_equal(proposals[i], self.agent_pos[i])]
+                if stayers:
+                    conflicts.update(i for i in ids if i not in stayers)
+                else:
+                    conflicts.update(ids)
         return conflicts
 
     def _resolve_swap_conflicts(self, prev_pos: np.ndarray, proposals: np.ndarray) -> set[int]:
@@ -323,6 +354,21 @@ class MultiAgentGridEvacuationEnv(gym.Env):
                 )
                 if i_to_j and j_to_i and both_moved:
                     conflicts.update([i, j])
+        return conflicts
+
+    def _resolve_occupied_target_conflicts(self, prev_pos: np.ndarray, proposals: np.ndarray) -> set[int]:
+        conflicts: set[int] = set()
+        for i in range(self.n_agents):
+            if not self.active[i] or np.array_equal(proposals[i], prev_pos[i]):
+                continue
+            for j in range(self.n_agents):
+                if i == j or not self.active[j]:
+                    continue
+                target_is_j_old_cell = np.array_equal(proposals[i], prev_pos[j])
+                j_did_not_vacate = np.array_equal(proposals[j], prev_pos[j])
+                if target_is_j_old_cell and j_did_not_vacate:
+                    conflicts.add(i)
+                    break
         return conflicts
 
     def _local_crowd(self, agent_id: int, positions: np.ndarray) -> int:
@@ -438,4 +484,3 @@ class MultiAgentGridEvacuationEnv(gym.Env):
 
     def render(self):
         return self.render_text()
-

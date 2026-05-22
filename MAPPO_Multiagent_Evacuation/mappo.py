@@ -116,7 +116,7 @@ class RolloutBuffer:
                 next_non_terminal = 1.0 - next_done
                 next_values = next_value
             else:
-                next_non_terminal = 1.0 - self.dones[t + 1]
+                next_non_terminal = 1.0 - self.dones[t]
                 next_values = self.values[t + 1]
             delta = self.rewards[t] + gamma * next_values * next_non_terminal - self.values[t]
             last_gae = delta + gamma * gae_lambda * next_non_terminal * last_gae
@@ -231,4 +231,3 @@ class MAPPOAgent:
         checkpoint = torch.load(path, map_location=self.device)
         self.actor.load_state_dict(checkpoint["actor"])
         self.critic.load_state_dict(checkpoint["critic"])
-

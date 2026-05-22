@@ -83,6 +83,7 @@ def main() -> None:
 
     num_updates = max(1, cfg.total_timesteps // cfg.rollout_steps)
     global_step = 0
+    last_done_tensor = torch.zeros(env.n_agents, dtype=torch.float32, device=cfg.device)
     for update in range(1, num_updates + 1):
         buffer = RolloutBuffer(cfg.rollout_steps, env.n_agents, env.obs_dim, agent.global_obs_dim, cfg.device)
         for _ in range(cfg.rollout_steps):
@@ -95,6 +96,7 @@ def main() -> None:
             done = terminated or truncated
             reward_tensor = torch.tensor(rewards, dtype=torch.float32, device=cfg.device)
             done_tensor = torch.full((env.n_agents,), float(done), dtype=torch.float32, device=cfg.device)
+            last_done_tensor = done_tensor
             buffer.add(obs_tensor, global_obs, actions, logprobs, reward_tensor, done_tensor, values)
 
             episode_reward += float(np.sum(rewards))
@@ -131,7 +133,7 @@ def main() -> None:
         global_obs = obs_tensor.flatten()
         with torch.no_grad():
             next_value = agent.critic(global_obs.unsqueeze(0)).squeeze(0)
-        next_done = torch.zeros(env.n_agents, dtype=torch.float32, device=cfg.device)
+        next_done = last_done_tensor
         buffer.compute_returns_and_advantages(next_value, next_done, cfg.gamma, cfg.gae_lambda)
         metrics = agent.update(buffer)
 
@@ -154,4 +156,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

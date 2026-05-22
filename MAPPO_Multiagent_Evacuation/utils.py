@@ -36,7 +36,9 @@ def create_demo_map(rows: int = 30, cols: int = 45) -> np.ndarray:
     grid[-1, :] = 1
     grid[:, 0] = 1
     grid[:, -1] = 1
-    grid[1, cols // 2] = 0
+    exit_col = cols // 2
+    grid[0, exit_col] = 0
+    grid[1, exit_col] = 0
     grid[rows // 2, 5 : cols - 5] = 1
     grid[rows // 2, cols // 2 - 2 : cols // 2 + 3] = 0
     grid[7 : rows - 6, cols // 3] = 1
@@ -104,4 +106,3 @@ def write_csv(path: str | Path, rows: Iterable[dict]) -> None:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
-
